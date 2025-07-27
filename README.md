@@ -30,7 +30,7 @@ ScreenCaptureApp/
 │       ├── Program.cs          # Demo with border comparison
 │       ├── ScreenCapture.cs    # P/Invoke wrapper class
 │       └── ScreenCaptureExample.csproj
-├── build-new/                  # Build output directory
+├── build/                  # Build output directory
 │   └── bin/Release/           # Ready-to-use executables & DLL
 ├── pch.h / pch.cpp            # Precompiled headers
 ├── CMakeLists.txt             # Build configuration
@@ -52,13 +52,13 @@ ScreenCaptureApp/
 cd ScreenCaptureApp
 
 # Create build directory
-mkdir build-new && cd build-new
+mkdir build && cd build
 
 # Configure and build
 cmake .. -G "Visual Studio 17 2022" -A x64
 cmake --build . --config Release
 
-# All components built to: build-new/bin/Release/
+# All components built to: build/bin/Release/
 ```
 
 ## 💻 Console Application Usage
