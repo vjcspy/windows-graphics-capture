@@ -1,0 +1,5 @@
+EXPORTS
+CaptureScreen
+CaptureScreenWithOptions
+GetErrorDescription
+GetLibraryVersion
