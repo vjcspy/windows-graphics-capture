@@ -8,7 +8,8 @@ A comprehensive C++ screen capture solution with **silent border-free capturing*
 - **🚫 Border-Free Capture**: Advanced options to hide Windows capture borders and cursor
 - **⚡ Dual Interface**: Both standalone console app and DLL for integration
 - **🎯 C# Ready**: Complete P/Invoke wrapper with full API coverage
-- **� Flexible Options**: Granular control over capture behavior
+- **💾 Direct Memory Capture**: High-performance memory-to-memory screenshot transfer (NEW!)
+- **📁 Flexible Options**: Granular control over capture behavior (file or memory output)
 - **📱 Modern API**: Windows Graphics Capture API with DirectX 11 acceleration
 
 ## � Project Structure
@@ -108,7 +109,7 @@ ScreenCaptureApp.exe --help
 
 ## 🔗 C# Integration
 
-### Basic Usage
+### Basic File Capture
 ```csharp
 using ScreenCaptureExample;
 
@@ -122,6 +123,34 @@ if (result == ScreenCapture.ErrorCode.Success)
 else
 {
     Console.WriteLine($"Error: {ScreenCapture.GetErrorDescription(result)}");
+}
+```
+
+### Memory Capture (High Performance)
+```csharp
+[DllImport("ScreenCaptureDLL.dll", CallingConvention = CallingConvention.Cdecl)]
+private static extern int CaptureScreenToMemory(bool hideBorder, bool hideCursor, out IntPtr buffer, out int size);
+
+[DllImport("ScreenCaptureDLL.dll", CallingConvention = CallingConvention.Cdecl)]
+private static extern void FreeBuffer(IntPtr buffer);
+
+// Direct memory capture - no file I/O
+IntPtr buffer = IntPtr.Zero;
+try
+{
+    int result = CaptureScreenToMemory(true, true, out buffer, out int size);
+    if (result == 0) // Success
+    {
+        byte[] imageData = new byte[size];
+        Marshal.Copy(buffer, imageData, 0, size);
+        // Use imageData directly (PNG format)
+        Console.WriteLine($"Captured {size} bytes to memory");
+    }
+}
+finally
+{
+    if (buffer != IntPtr.Zero)
+        FreeBuffer(buffer);
 }
 ```
 
@@ -269,7 +298,7 @@ EXAMPLES:
   ScreenCaptureApp.exe --show-border "comparison.png"      # Border visible
 ```
 
-### C# API
+### C# API (Legacy File-Based)
 ```csharp
 // Core methods
 ScreenCapture.Capture(string outputPath)
@@ -280,6 +309,21 @@ ScreenCapture.GetErrorDescription(ErrorCode errorCode)
 ScreenCapture.GetVersion()
 
 // All methods return ErrorCode enum for consistent error handling
+```
+
+### DLL API (High Performance Memory Capture)
+```csharp
+// P/Invoke declarations
+[DllImport("ScreenCaptureDLL.dll", CallingConvention = CallingConvention.Cdecl)]
+private static extern int CaptureScreenToMemory(bool hideBorder, bool hideCursor, out IntPtr buffer, out int size);
+
+[DllImport("ScreenCaptureDLL.dll", CallingConvention = CallingConvention.Cdecl)]
+private static extern void FreeBuffer(IntPtr buffer);
+
+// Memory capture function
+// Returns: 0 = Success, 1 = Initialization Error, 2 = Capture Error, 3 = Save Error
+// Output: buffer contains PNG data, size is data length in bytes
+// Important: Always call FreeBuffer(buffer) to avoid memory leaks
 ```
 
 ## 🔄 Integration Examples

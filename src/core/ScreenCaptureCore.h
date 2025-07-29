@@ -57,6 +57,9 @@ namespace ScreenCaptureCore
         // Capture with options
         ErrorCode CaptureToFile(const std::wstring& outputPath, bool hideBorder, bool hideCursor = true);
 
+        // Capture to memory buffer (PNG format)
+        ErrorCode CaptureToMemory(std::vector<uint8_t>& outputBuffer, bool hideBorder = true, bool hideCursor = true);
+
     private:
         ILogger* m_logger;
         SilentLogger m_defaultLogger;
@@ -66,5 +69,6 @@ namespace ScreenCaptureCore
         
         // Internal capture with options
         ErrorCode InternalCapture(const std::wstring& outputPath, bool hideBorder, bool hideCursor);
+        ErrorCode InternalCaptureToMemory(std::vector<uint8_t>& outputBuffer, bool hideBorder, bool hideCursor);
     };
 }

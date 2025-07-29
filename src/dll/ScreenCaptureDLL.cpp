@@ -67,6 +67,65 @@ extern "C" {
         }
     }
 
+    SCREENCAPTUREDLL_API ScreenCaptureResult CaptureScreenToMemory(unsigned char** outputBuffer, unsigned int* bufferSize, int hideBorder, int hideCursor)
+    {
+        // Validate input parameters
+        if (!outputBuffer || !bufferSize)
+        {
+            return SC_INVALID_PARAMETER;
+        }
+
+        try
+        {
+            // Create silent logger for DLL (no console output)
+            SilentLogger logger;
+            
+            // Create screen capture instance
+            ScreenCapture capture(&logger);
+
+            // Capture to memory buffer
+            std::vector<uint8_t> buffer;
+            auto result = capture.CaptureToMemory(buffer, hideBorder != 0, hideCursor != 0);
+
+            if (result == ErrorCode::Success && !buffer.empty())
+            {
+                // Allocate buffer for caller
+                *bufferSize = static_cast<unsigned int>(buffer.size());
+                *outputBuffer = static_cast<unsigned char*>(malloc(*bufferSize));
+                
+                if (*outputBuffer)
+                {
+                    memcpy(*outputBuffer, buffer.data(), *bufferSize);
+                    return SC_SUCCESS;
+                }
+                else
+                {
+                    return SC_UNKNOWN_ERROR; // Memory allocation failed
+                }
+            }
+            else
+            {
+                *outputBuffer = nullptr;
+                *bufferSize = 0;
+                return ConvertErrorCode(result);
+            }
+        }
+        catch (...)
+        {
+            *outputBuffer = nullptr;
+            *bufferSize = 0;
+            return SC_UNKNOWN_ERROR;
+        }
+    }
+
+    SCREENCAPTUREDLL_API void FreeBuffer(unsigned char* buffer)
+    {
+        if (buffer)
+        {
+            free(buffer);
+        }
+    }
+
     SCREENCAPTUREDLL_API const wchar_t* GetErrorDescription(ScreenCaptureResult errorCode)
     {
         switch (errorCode)

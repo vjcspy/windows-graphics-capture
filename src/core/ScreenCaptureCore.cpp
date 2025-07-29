@@ -150,6 +150,11 @@ namespace ScreenCaptureCore
         return InternalCapture(outputPath, hideBorder, hideCursor);
     }
 
+    ErrorCode ScreenCapture::CaptureToMemory(std::vector<uint8_t>& outputBuffer, bool hideBorder, bool hideCursor)
+    {
+        return InternalCaptureToMemory(outputBuffer, hideBorder, hideCursor);
+    }
+
     ErrorCode ScreenCapture::InternalCapture(const std::wstring& outputPath, bool hideBorder, bool hideCursor)
     {
         try
@@ -380,6 +385,239 @@ namespace ScreenCaptureCore
         catch (hresult_error const& ex)
         {
             LogError(L"Capture error: " + std::wstring(ex.message()));
+            return ErrorCode::CaptureSessionFailed;
+        }
+        catch (std::exception const& ex)
+        {
+            std::wstring errorMsg(ex.what(), ex.what() + strlen(ex.what()));
+            LogError(L"Standard error: " + errorMsg);
+            return ErrorCode::UnknownError;
+        }
+        catch (...)
+        {
+            LogError(L"Unknown error occurred");
+            return ErrorCode::UnknownError;
+        }
+    }
+
+    // Helper function to setup capture session
+    std::tuple<winrt::Windows::Graphics::Capture::GraphicsCaptureSession, 
+               winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool,
+               winrt::com_ptr<ID3D11Device>> SetupCaptureSession(bool hideBorder, bool hideCursor)
+    {
+        // 1. Create D3D11 Device
+        auto d3d11Device = CreateD3DDevice();
+        auto direct3DDevice = CreateDirect3DDeviceFromD3D11Device(d3d11Device);
+
+        // 2. Create capture item for primary monitor
+        auto captureItem = CreateCaptureItemForMonitor();
+
+        // 3. Create Direct3D11CaptureFramePool
+        auto framePool = Direct3D11CaptureFramePool::Create(
+            direct3DDevice,
+            DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            1,
+            captureItem.Size()
+        );
+
+        // 4. Create capture session
+        auto session = framePool.CreateCaptureSession(captureItem);
+
+        // 5. Configure capture session options
+        if (hideCursor)
+        {
+            session.IsCursorCaptureEnabled(false);
+        }
+
+        if (hideBorder)
+        {
+            try
+            {
+                session.IsBorderRequired(false);
+            }
+            catch (...)
+            {
+                // Ignore if not supported
+            }
+        }
+
+        return std::make_tuple(session, framePool, d3d11Device);
+    }
+
+    ErrorCode ScreenCapture::InternalCaptureToMemory(std::vector<uint8_t>& outputBuffer, bool hideBorder, bool hideCursor)
+    {
+        try
+        {
+            Log(L"Initializing capture system for memory output...");
+
+            auto [session, framePool, d3d11Device] = SetupCaptureSession(hideBorder, hideCursor);
+
+            // 6. Setup frame processing
+            bool frameReceived = false;
+            bool captureSuccess = false;
+            std::mutex frameMutex;
+            std::condition_variable frameCondition;
+
+            Log(L"Setting up frame handler for memory capture...");
+
+            framePool.FrameArrived([&](auto const& sender, auto const& args)
+            {
+                Log(L"FrameArrived event triggered!");
+
+                auto frame = sender.TryGetNextFrame();
+                if (frame)
+                {
+                    try
+                    {
+                        Log(L"Frame captured! Processing to memory...");
+
+                        // Get the Direct3D11 surface
+                        auto surface = frame.Surface();
+
+                        // Get the underlying D3D11 texture using interop
+                        com_ptr<ID3D11Texture2D> texture;
+                        auto dxgiInterfaceAccess = surface.as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+                        winrt::check_hresult(dxgiInterfaceAccess->GetInterface(IID_PPV_ARGS(&texture)));
+
+                        // Get texture description
+                        D3D11_TEXTURE2D_DESC desc;
+                        texture->GetDesc(&desc);
+
+                        Log(L"Texture size: " + std::to_wstring(desc.Width) + L"x" + std::to_wstring(desc.Height));
+
+                        // Create staging texture for CPU access
+                        desc.Usage = D3D11_USAGE_STAGING;
+                        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                        desc.BindFlags = 0;
+                        desc.MiscFlags = 0;
+
+                        com_ptr<ID3D11Texture2D> stagingTexture;
+                        winrt::check_hresult(d3d11Device->CreateTexture2D(&desc, nullptr, stagingTexture.put()));
+
+                        // Copy to staging texture
+                        com_ptr<ID3D11DeviceContext> context;
+                        d3d11Device->GetImmediateContext(context.put());
+                        context->CopyResource(stagingTexture.get(), texture.get());
+
+                        // Map the texture
+                        D3D11_MAPPED_SUBRESOURCE mappedResource;
+                        winrt::check_hresult(context->Map(stagingTexture.get(), 0, D3D11_MAP_READ, 0, &mappedResource));
+
+                        // Create bitmap data
+                        uint32_t dataSize = mappedResource.RowPitch * desc.Height;
+                        std::vector<uint8_t> bitmapData(dataSize);
+                        memcpy(bitmapData.data(), mappedResource.pData, dataSize);
+
+                        context->Unmap(stagingTexture.get(), 0);
+
+                        // Encode to PNG in memory
+                        try
+                        {
+                            InMemoryRandomAccessStream stream;
+                            BitmapEncoder encoder = BitmapEncoder::CreateAsync(BitmapEncoder::PngEncoderId(), stream).get();
+
+                            encoder.SetPixelData(
+                                BitmapPixelFormat::Bgra8,
+                                BitmapAlphaMode::Ignore,
+                                desc.Width,
+                                desc.Height,
+                                96.0,
+                                96.0,
+                                bitmapData
+                            );
+
+                            encoder.FlushAsync().get();
+
+                            // Read stream into output buffer
+                            auto reader = DataReader(stream.GetInputStreamAt(0));
+                            auto bytesToRead = static_cast<uint32_t>(stream.Size());
+                            reader.LoadAsync(bytesToRead).get();
+
+                            outputBuffer.resize(bytesToRead);
+                            reader.ReadBytes(winrt::array_view<uint8_t>(outputBuffer));
+
+                            Log(L"Screenshot encoded to memory successfully. Size: " + std::to_wstring(outputBuffer.size()) + L" bytes");
+                            captureSuccess = true;
+                        }
+                        catch (...)
+                        {
+                            LogError(L"Error encoding screenshot to memory");
+                        }
+
+                        // Signal completion
+                        {
+                            std::lock_guard<std::mutex> lock(frameMutex);
+                            frameReceived = true;
+                        }
+                        frameCondition.notify_one();
+                    }
+                    catch (hresult_error const& ex)
+                    {
+                        LogError(L"Error processing frame: " + std::wstring(ex.message()));
+                        {
+                            std::lock_guard<std::mutex> lock(frameMutex);
+                            frameReceived = true;
+                        }
+                        frameCondition.notify_one();
+                    }
+                }
+                else
+                {
+                    LogError(L"No frame available");
+                }
+            });
+
+            // 7. Start capture
+            Log(L"Starting capture session...");
+            session.StartCapture();
+
+            // Wait for frame with timeout and message pumping
+            Log(L"Waiting for frame (timeout: 10 seconds)...");
+            {
+                std::unique_lock<std::mutex> lock(frameMutex);
+                auto start = std::chrono::steady_clock::now();
+                auto timeout = std::chrono::seconds(10);
+
+                while (!frameReceived && (std::chrono::steady_clock::now() - start) < timeout)
+                {
+                    lock.unlock();
+
+                    // Pump messages to allow Windows events to be processed
+                    MSG msg;
+                    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+                    {
+                        TranslateMessage(&msg);
+                        DispatchMessage(&msg);
+                    }
+
+                    // Small sleep to prevent busy waiting
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+                    lock.lock();
+                }
+
+                if (frameReceived)
+                {
+                    Log(L"Frame received and processed to memory!");
+                }
+                else
+                {
+                    LogError(L"Timeout: No frame received within 10 seconds");
+                    return ErrorCode::TimeoutError;
+                }
+            }
+
+            // Cleanup
+            session.Close();
+            framePool.Close();
+
+            Log(L"Memory capture completed!");
+
+            return captureSuccess ? ErrorCode::Success : ErrorCode::TextureProcessingFailed;
+        }
+        catch (hresult_error const& ex)
+        {
+            LogError(L"Memory capture error: " + std::wstring(ex.message()));
             return ErrorCode::CaptureSessionFailed;
         }
         catch (std::exception const& ex)

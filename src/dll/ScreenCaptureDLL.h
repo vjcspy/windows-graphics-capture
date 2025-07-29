@@ -34,6 +34,18 @@ extern "C" {
     // Returns: ScreenCaptureResult error code
     SCREENCAPTUREDLL_API ScreenCaptureResult CaptureScreenWithOptions(const wchar_t* outputPath, int hideBorder, int hideCursor);
 
+    // Capture to memory buffer (PNG format)
+    // outputBuffer: Pointer to receive the buffer pointer (caller must free with FreeBuffer)
+    // bufferSize: Pointer to receive the buffer size
+    // hideBorder: Try to hide capture border (true recommended)
+    // hideCursor: Hide mouse cursor in capture (true recommended)
+    // Returns: ScreenCaptureResult error code
+    SCREENCAPTUREDLL_API ScreenCaptureResult CaptureScreenToMemory(unsigned char** outputBuffer, unsigned int* bufferSize, int hideBorder, int hideCursor);
+
+    // Free buffer allocated by CaptureScreenToMemory
+    // buffer: Buffer pointer returned by CaptureScreenToMemory
+    SCREENCAPTUREDLL_API void FreeBuffer(unsigned char* buffer);
+
     // Get error description for a given error code
     // errorCode: The error code returned by CaptureScreen
     // Returns: Pointer to null-terminated wide string describing the error
